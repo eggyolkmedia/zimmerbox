@@ -1,0 +1,30 @@
+// TODO Move settings to EEPROM, create config console via hotspot
+
+#define WIFI_SSID "..."
+#define WIFI_PASS "..."
+
+#define MQTT_HOST "..."
+#define MQTT_PORT ...
+
+// TODO Configurable topics
+#define TOPIC_STATE ".../state"
+#define TOPIC_SET   ".../set"
+
+#define PIN_BUTTON 0
+#define PIN_RELAY  12
+#define PIN_LED    13
+
+#define STATE_FREQ_MILLIS 10000
+
+
+// # Switches (experimental)
+// mqtt:
+
+// switch:
+//   - name: switch01
+//     platform: mqtt
+//     command_topic: ".../set"
+//     state_topic: ".../state"
+//     payload_on: "1"
+//     payload_off: "0"
+//     optimistic: false
