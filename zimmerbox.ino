@@ -1,5 +1,6 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
+#include <Bounce2.h>
 #include "settings.h"
 
 const char* ssid = WIFI_SSID;
@@ -11,11 +12,18 @@ bool relay_state = LOW; // TODO Get from memory
 WiFiClient espClient;
 PubSubClient client(espClient);
 
-long lastMsg = 0;
+unsigned long last_state = 0;
+unsigned long last_button = 0;
 char msg[50];
+Bounce bounce;
 
 void setup() {
   pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_BUTTON, INPUT);
+
+  bounce.attach(PIN_BUTTON);
+  bounce.interval(50);
+
   Serial.begin(115200);
   setup_wifi();
   client.setServer(mqtt_server, MQTT_PORT);
@@ -23,7 +31,8 @@ void setup() {
 }
 
 void setup_wifi() {
-  delay(10);
+//  delay(10);
+  delay(1000);
   
   // TODO Replace with optional logging
   Serial.println();
@@ -32,7 +41,7 @@ void setup_wifi() {
 
   WiFi.begin(ssid, password);
 
-  // TODO Replace with nonblocking connection
+  // TODO Replace with nonblocking connection + button check
   while (WiFi.status() != WL_CONNECTED) {
     delay(500);
     Serial.print(".");
@@ -43,8 +52,11 @@ void setup_wifi() {
   Serial.println("IP address: ");
   Serial.println(WiFi.localIP());
 
+  long now = millis();
+  last_state = now;
+  last_button = now;
+
   update_relay();
-  update_state();
 }
 
 void callback(char* topic, byte* payload, unsigned int length) {
@@ -60,9 +72,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   // TODO More meaningful messages
   relay_state = (char)payload[0] == '1';
   update_relay();
-  update_state();
 }
-
 
 // TODO Replace with nonblocking reconnection
 void reconnect() {
@@ -89,18 +99,46 @@ void reconnect() {
 void update_relay() {
   // TODO Insert relay debouncing
   digitalWrite(PIN_LED, !relay_state);
+  update_state();
 }
 
 void update_state() {
-    lastMsg = millis();
+    last_state = millis();
     //snprintf (msg, 50, "hello world #%ld", value);
     msg[0] = relay_state ? '1' : '0';
     msg[1] = 0;
     Serial.print("[");
     Serial.print(TOPIC_STATE);
-    Serial.print("] published : ");
+    Serial.print("] published: ");
     Serial.println(msg);
     client.publish(TOPIC_STATE, msg);
+}
+
+void check_button() {
+  bounce.update();
+  
+  if (bounce.fell()) {
+    last_button = millis();
+//    Serial.println("fell");
+    relay_state = !relay_state;
+    update_relay();
+    
+
+    // TODO Start blinking after a while...
+  }
+
+  if (bounce.rose()) {
+    Serial.println("rose");
+    unsigned long diff = millis() - last_button;
+    if (diff > BUTTON_LONG_PRESS_MILLIS) {
+      reset_box();
+    }
+  }
+}
+
+void reset_box() {
+  Serial.println("Resetting...");
+  // TODO Actual reset + toggle box relay (maybe after small delay?)
 }
 
 
@@ -111,8 +149,12 @@ void loop() {
   }
   client.loop();
 
+  check_button();
+
   // TODO Handle millis() rollover  
-  if (millis() - lastMsg > STATE_FREQ_MILLIS) {
+  if (millis() - last_state > STATE_FREQ_MILLIS) {
     update_state();
   }
+
+  
 }
