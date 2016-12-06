@@ -1,16 +1,27 @@
+#include <Bounce2.h>
+#include <EEPROM.h>
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
-#include <Bounce2.h>
+
 #include "settings.h"
 
-const char* ssid = WIFI_SSID;
-const char* password = WIFI_PASS;
-const char* mqtt_server = MQTT_HOST;
+struct Config {
+  char wifi_ssid[20];
+  char wifi_pass[20];
+
+  char mqtt_host[15];
+  int mqtt_port;
+
+  char topic_state[64];
+  char topic_set[64];
+};
 
 bool relay_state = LOW; // TODO Get from memory
 
 WiFiClient espClient;
 PubSubClient client(espClient);
+// TODO Verify that topic_state != topic_set (otherwise it causes infinite loops)
+Config config = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
 
 unsigned long last_state = 0;
 unsigned long last_button = 0;
@@ -26,7 +37,7 @@ void setup() {
 
   Serial.begin(115200);
   setup_wifi();
-  client.setServer(mqtt_server, MQTT_PORT);
+  client.setServer(config.mqtt_host, config.mqtt_port);
   client.setCallback(callback);
 }
 
@@ -37,9 +48,9 @@ void setup_wifi() {
   // TODO Replace with optional logging
   Serial.println();
   Serial.print("Connecting to ");
-  Serial.println(ssid);
+  Serial.println(config.wifi_ssid);
 
-  WiFi.begin(ssid, password);
+  WiFi.begin(config.wifi_ssid, config.wifi_pass);
 
   // TODO Replace with nonblocking connection + button check
   while (WiFi.status() != WL_CONNECTED) {
@@ -81,11 +92,8 @@ void reconnect() {
     Serial.print("Attempting MQTT connection...");
     // Attempt to connect
     if (client.connect("ESP8266Client")) { // Todo ??
-      Serial.println("connected");
-      // Once connected, publish an announcement...
-      client.publish(TOPIC_STATE, "Connected");
-      // ... and resubscribe
-      client.subscribe(TOPIC_SET);
+      Serial.println("connected");      
+      client.subscribe(config.topic_set);
     } else {
       Serial.print("failed, rc=");
       Serial.print(client.state());
@@ -94,6 +102,7 @@ void reconnect() {
       delay(5000);
     }
   }
+  update_state();
 }
 
 void update_relay() {
@@ -108,10 +117,10 @@ void update_state() {
     msg[0] = relay_state ? '1' : '0';
     msg[1] = 0;
     Serial.print("[");
-    Serial.print(TOPIC_STATE);
+    Serial.print(config.topic_state);
     Serial.print("] published: ");
     Serial.println(msg);
-    client.publish(TOPIC_STATE, msg);
+    client.publish(config.topic_state, msg);
 }
 
 void check_button() {
