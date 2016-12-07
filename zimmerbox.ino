@@ -20,15 +20,17 @@ bool relay_state = LOW; // TODO Get from memory
 
 WiFiClient espClient;
 PubSubClient client(espClient);
-// TODO Verify that topic_state != topic_set (otherwise it causes infinite loops)
-Config config = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
+Config config;
 
 unsigned long last_state = 0;
 unsigned long last_button = 0;
 char msg[50];
 Bounce bounce;
 
-void setup() {
+void setup() {  
+  EEPROM.begin(sizeof(Config));
+  load_state();
+  
   pinMode(PIN_LED, OUTPUT);
   pinMode(PIN_BUTTON, INPUT);
 
@@ -41,6 +43,17 @@ void setup() {
   client.setCallback(callback);
 }
 
+void save_state(Config new_state) {
+  EEPROM.put(0, new_state);
+  EEPROM.commit();
+}
+
+void load_state() {
+  // Validate config (maybe store checksum? if missing, go into config mode; check that topic_set != topic_state)
+  EEPROM.get(0, config);  
+  Serial.print("Loaded config; ssid = ");
+  Serial.println(config.wifi_ssid);
+}
 void setup_wifi() {
 //  delay(10);
   delay(1000);
@@ -137,7 +150,7 @@ void check_button() {
   }
 
   if (bounce.rose()) {
-    Serial.println("rose");
+//    Serial.println("rose");
     unsigned long diff = millis() - last_button;
     if (diff > BUTTON_LONG_PRESS_MILLIS) {
       reset_box();
@@ -147,6 +160,10 @@ void check_button() {
 
 void reset_box() {
   Serial.println("Resetting...");
+  // TODO REMOVE
+  Config cc = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
+  save_state(cc);
+  load_state(); 
   // TODO Actual reset + toggle box relay (maybe after small delay?)
 }
 
