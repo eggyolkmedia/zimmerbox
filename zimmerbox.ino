@@ -1,9 +1,14 @@
 #include <Bounce2.h>
 #include <EEPROM.h>
 #include <ESP8266WiFi.h>
+// TODO Implement basic config validation using this as a CRC
+#include "MD5Builder.h"
 #include <PubSubClient.h>
 
 #include "settings.h"
+
+#define MODE_NORMAL 0
+#define MODE_CONFIG 1
 
 struct Config {
   char wifi_ssid[20];
@@ -14,9 +19,10 @@ struct Config {
 
   char topic_state[64];
   char topic_set[64];
-};
 
-bool relay_state = LOW; // TODO Get from memory
+  // Intentionally placed at the end, so adding config fields will be detected as a change
+  uint8_t hashcode[16];
+};
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -27,37 +33,57 @@ unsigned long last_button = 0;
 char msg[50];
 Bounce bounce;
 
-void setup() {  
+bool relay_state = LOW;
+byte mode;
+
+void setup() { 
+  Serial.begin(115200);
+  delay(1000); // TODO Nonblocking wait (maybe blink led)
+   
   EEPROM.begin(sizeof(Config));
-  load_state();
+  load_config();
+
+  // Determine mode according to config validity
+  mode = validate_config() ? MODE_NORMAL : MODE_CONFIG;
   
+  bounce.attach(PIN_BUTTON);
+  bounce.interval(50);
   pinMode(PIN_LED, OUTPUT);
   pinMode(PIN_BUTTON, INPUT);
 
-  bounce.attach(PIN_BUTTON);
-  bounce.interval(50);
-
-  Serial.begin(115200);
   setup_wifi();
   client.setServer(config.mqtt_host, config.mqtt_port);
   client.setCallback(callback);
 }
 
-void save_state(Config new_state) {
-  EEPROM.put(0, new_state);
+bool validate_config() {
+  uint8_t buff[16];
+  get_config_hashcode(buff);
+  return memcmp(config.hashcode, buff, 16) == 0; 
+}
+
+void get_config_hashcode(uint8_t* buff16) {
+  MD5Builder md5;
+  md5.begin();
+  md5.add((uint8_t*)&config, sizeof(Config)-16); // Exclude previous hashcode
+  md5.calculate();
+  md5.getBytes(buff16);    
+}
+
+void save_config() {  
+  EEPROM.put(0, config);
   EEPROM.commit();
 }
 
-void load_state() {
+void load_config() {
   // Validate config (maybe store checksum? if missing, go into config mode; check that topic_set != topic_state)
   EEPROM.get(0, config);  
   Serial.print("Loaded config; ssid = ");
   Serial.println(config.wifi_ssid);
+  Serial.print("Config valid? ");
+  Serial.println(validate_config());
 }
 void setup_wifi() {
-//  delay(10);
-  delay(1000);
-  
   // TODO Replace with optional logging
   Serial.println();
   Serial.print("Connecting to ");
@@ -141,16 +167,13 @@ void check_button() {
   
   if (bounce.fell()) {
     last_button = millis();
-//    Serial.println("fell");
     relay_state = !relay_state;
     update_relay();
-    
 
-    // TODO Start blinking after a while...
+    // TODO Start blinking after a while if button is pressed
   }
 
   if (bounce.rose()) {
-//    Serial.println("rose");
     unsigned long diff = millis() - last_button;
     if (diff > BUTTON_LONG_PRESS_MILLIS) {
       reset_box();
@@ -158,18 +181,22 @@ void check_button() {
   }
 }
 
+// Note: first reset after a serial flash will get stuck on 'boot mode:(1,7)'.
+// This is a known ESP issue and affects only the first reset
+// See also: https://github.com/esp8266/Arduino/issues/1017
 void reset_box() {
-  Serial.println("Resetting...");
-  // TODO REMOVE
-  Config cc = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
-  save_state(cc);
-  load_state(); 
-  // TODO Actual reset + toggle box relay (maybe after small delay?)
+  Serial.println("Resetting... the module will start in config mode");
+  memset(config.hashcode, 0, 16);
+  save_config();
+  ESP.restart();
 }
 
+Config initial_config() {
+  Config cc = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
+  return cc;
+}
 
 void loop() {
-
   if (!client.connected()) {
     reconnect();
   }
