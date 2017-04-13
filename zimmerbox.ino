@@ -33,22 +33,29 @@ unsigned long last_button = 0;
 char msg[50];
 Bounce bounce;
 
+// TODO support more output types (dimmables, etc.)
 bool relay_state = LOW;
-byte mode;
+// byte mode;
 
-void setup() { 
-  Serial.begin(115200);
+void setup() {
+  Serial.begin(9600);
   delay(1000); // TODO Nonblocking wait (maybe blink led)
    
   EEPROM.begin(sizeof(Config));
   load_config();
 
-  // Determine mode according to config validity
-  mode = validate_config() ? MODE_NORMAL : MODE_CONFIG;
+  // TODO allow user config changes; currently just init config to default if not valid
+  if (!validate_config()) {
+    config = initial_config();
+    save_config();
+  }
   
+  // Determine mode according to config validity
+  //mode = validate_config() ? MODE_NORMAL : MODE_CONFIG;
+
   bounce.attach(PIN_BUTTON);
   bounce.interval(50);
-  pinMode(PIN_LED, OUTPUT);
+  pinMode(PIN_RELAY, OUTPUT);
   pinMode(PIN_BUTTON, INPUT);
 
   setup_wifi();
@@ -62,6 +69,7 @@ bool validate_config() {
   return memcmp(config.hashcode, buff, 16) == 0; 
 }
 
+// TODO change signature to return hash rather than populate the input buffer
 void get_config_hashcode(uint8_t* buff16) {
   MD5Builder md5;
   md5.begin();
@@ -70,7 +78,7 @@ void get_config_hashcode(uint8_t* buff16) {
   md5.getBytes(buff16);    
 }
 
-void save_config() {  
+void save_config() {
   EEPROM.put(0, config);
   EEPROM.commit();
 }
@@ -83,6 +91,7 @@ void load_config() {
   Serial.print("Config valid? ");
   Serial.println(validate_config());
 }
+
 void setup_wifi() {
   // TODO Replace with optional logging
   Serial.println();
@@ -125,6 +134,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
 }
 
 // TODO Replace with nonblocking reconnection
+// TODO Allow switch operation even when not connected to MQTT server
 void reconnect() {
   // Loop until we're reconnected
   while (!client.connected()) {
@@ -146,7 +156,7 @@ void reconnect() {
 
 void update_relay() {
   // TODO Insert relay debouncing
-  digitalWrite(PIN_LED, !relay_state);
+  digitalWrite(PIN_RELAY, relay_state);
   update_state();
 }
 
@@ -186,13 +196,19 @@ void check_button() {
 // See also: https://github.com/esp8266/Arduino/issues/1017
 void reset_box() {
   Serial.println("Resetting... the module will start in config mode");
-  memset(config.hashcode, 0, 16);
+  // TODO uncomment once config mode is ready
+  // memset(config.hashcode, ?, 16); // Wipe hashcode, to go into config mode after reboot
+  // TODO remove this once config mode is ready
+
   save_config();
   ESP.restart();
 }
 
 Config initial_config() {
   Config cc = {WIFI_SSID, WIFI_PASS, MQTT_HOST, MQTT_PORT, TOPIC_STATE, TOPIC_SET};
+  uint8_t buff[16];
+  get_config_hashcode(buff);
+  memcpy(config.hashcode, buff, 16);
   return cc;
 }
 
@@ -208,6 +224,4 @@ void loop() {
   if (millis() - last_state > STATE_FREQ_MILLIS) {
     update_state();
   }
-
-  
 }
